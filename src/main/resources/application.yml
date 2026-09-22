@@ -1,0 +1,70 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: ms-campuslab-report
+
+  datasource:
+    url: jdbc:oracle:thin:@//${DB_HOST:localhost}:${DB_PORT:1521}/${DB_SERVICE:XEPDB1}
+    username: ${DB_USERNAME:campuslab_report}
+    password: ${DB_PASSWORD:changeme}
+    driver-class-name: oracle.jdbc.OracleDriver
+    hikari:
+      minimum-idle: 2
+      maximum-pool-size: 10
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate   # el esquema lo gestiona Flyway, no Hibernate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.OracleDialect
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
+    # Este servicio comparte el mismo usuario/schema Oracle que catalog,
+    # bookings y audit (una sola BD para todo el caso). Sin una tabla de
+    # historial propia, todos comparten flyway_schema_history y Flyway
+    # rechaza el V1 de este servicio por checksum distinto al V1 de otro
+    # microservicio que ya ocupaba esa version en la tabla compartida.
+    table: flyway_schema_history_report
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${AUTH_ISSUER_URI:http://localhost:8080/realms/campuslab}
+
+  # Broker externo (mismo cluster Kafka de infra/kafka que usa bookings como
+  # productor). group-id "report-svc" coincide con el sufijo de la
+  # dead-letter topic propia de este servicio (bookings.events.report-svc.DLT).
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:34.201.119.90:9092}
+    consumer:
+      group-id: report-svc
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+  health:
+    kafka:
+      enabled: false
+
+logging:
+  level:
+    com.campuslab.report: INFO
+    org.hibernate.SQL: WARN
