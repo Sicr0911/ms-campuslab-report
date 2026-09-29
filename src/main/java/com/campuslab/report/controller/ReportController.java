@@ -3,6 +3,7 @@ package com.campuslab.report.controller;
 import com.campuslab.report.dto.KpisResponseDTO;
 import com.campuslab.report.dto.TopResourceDTO;
 import com.campuslab.report.repository.ReservaSnapshotRepository;
+import com.campuslab.report.util.RangeParser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,18 +21,22 @@ import java.util.Map;
 /**
  * API de solo lectura de KPIs, calculados sobre REPORT_RESERVA_SNAPSHOTS
  * (el estado mas reciente de cada reserva, mantenido al dia consumiendo
- * bookings.events). Restringida a ADMIN/AUDITOR, igual que ms-campuslab-audit.
+ * bookings.events). Restringida a ADMIN, segun el caso (a diferencia de
+ * auditoria, que ademas incluye al Auditor).
  */
 @RestController
 @RequestMapping("/api/report")
 @RequiredArgsConstructor
-@PreAuthorize("hasAnyRole('ADMIN', 'AUDITOR')")
+@PreAuthorize("hasRole('ADMIN')")
 public class ReportController {
 
     private final ReservaSnapshotRepository repository;
 
     /**
-     * GET /api/report/kpis
+     * GET /api/report/kpis?range=last24h
+     * range es opcional (formato last{N}h o last{N}d); sin el, se calcula
+     * sobre el historico completo. Filtra por fechaCreacion de la reserva.
+     *
      * tasaAprobacion: reservas cuyo estado actual ya paso por APROBADA
      * (APROBADA/EN_PREPARACION/EN_USO/DEVUELTA) sobre el total. tasaCancelacion:
      * reservas actualmente CANCELADA sobre el total. Son una aproximacion
@@ -38,11 +44,14 @@ public class ReportController {
      * consistente con que report solo mantiene el ultimo snapshot por reserva.
      */
     @GetMapping("/kpis")
-    public ResponseEntity<KpisResponseDTO> kpis() {
-        long total = repository.count();
+    public ResponseEntity<KpisResponseDTO> kpis(@RequestParam(required = false) String range) {
+        Instant desde = RangeParser.desde(range);
+
+        long total = desde == null ? repository.count() : repository.countByFechaCreacionGreaterThanEqual(desde);
 
         Map<String, Long> porEstado = new LinkedHashMap<>();
-        repository.contarPorEstado().forEach(fila -> porEstado.put(fila.getEstado(), fila.getCantidad()));
+        var filas = desde == null ? repository.contarPorEstado() : repository.contarPorEstadoDesde(desde);
+        filas.forEach(fila -> porEstado.put(fila.getEstado(), fila.getCantidad()));
 
         long aprobadasOMasAlla = porEstado.getOrDefault("APROBADA", 0L)
                 + porEstado.getOrDefault("EN_PREPARACION", 0L)
@@ -57,14 +66,21 @@ public class ReportController {
     }
 
     /**
-     * GET /api/report/top-resources?limit=10
+     * GET /api/report/top-resources?range=last7d&limit=10
      * Recursos con mas reservas (de cualquier estado), de mayor a menor.
+     * range es opcional, mismo formato que en /kpis.
      */
     @GetMapping("/top-resources")
     public ResponseEntity<List<TopResourceDTO>> topResources(
+            @RequestParam(required = false) String range,
             @RequestParam(defaultValue = "10") int limit) {
 
-        List<TopResourceDTO> resultado = repository.topRecursos(PageRequest.of(0, limit)).stream()
+        Instant desde = RangeParser.desde(range);
+        var filas = desde == null
+                ? repository.topRecursos(PageRequest.of(0, limit))
+                : repository.topRecursosDesde(desde, PageRequest.of(0, limit));
+
+        List<TopResourceDTO> resultado = filas.stream()
                 .map(fila -> new TopResourceDTO(fila.getRecursoId(), fila.getCantidad()))
                 .toList();
 
