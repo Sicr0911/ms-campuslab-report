@@ -24,7 +24,8 @@ public class BookingsEventListener {
     private final ReservaSnapshotRepository repository;
     private final ObjectMapper objectMapper;
 
-    @KafkaListener(topics = "bookings.events", groupId = "${spring.kafka.consumer.group-id}")
+    @KafkaListener(topics = "bookings.events", groupId = "${spring.kafka.consumer.group-id}",
+            autoStartup = "${campuslab.kafka.listener.auto-startup:true}")
     @Transactional
     public void onMessage(String message) {
         EventEnvelope envelope;
